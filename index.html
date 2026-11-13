@@ -59,6 +59,7 @@ function redraw(){if(!state.pdf)return;ctx.clearRect(0,0,overlay.width,overlay.h
 function drawLine(points,color,size,erase,close=false){if(!points.length)return;ctx.save();ctx.globalCompositeOperation=erase?'destination-out':'source-over';ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=size;ctx.lineCap='round';ctx.lineJoin='round';ctx.beginPath();ctx.moveTo(points[0][0]*overlay.width,points[0][1]*overlay.height);for(let i=1;i<points.length;i++)ctx.lineTo(points[i][0]*overlay.width,points[i][1]*overlay.height);if(close&&points.length>2)ctx.closePath();ctx.stroke();if(points.length===1){ctx.beginPath();ctx.arc(points[0][0]*overlay.width,points[0][1]*overlay.height,size/2,0,Math.PI*2);ctx.fill()}ctx.restore()}
 function paint(op){if(op.kind==='stroke'){drawLine(op.points,op.color,op.size,op.erase,!!op.close);return}if(op.kind==='text'){ctx.save();ctx.fillStyle=op.color;const size=op.size*overlay.width/900;const lineH=size*1.24;ctx.font=`${size}px Arial, sans-serif`;ctx.textBaseline='top';let y=op.y*overlay.height;for(const line of op.text.split('\n')){let words=line.split(' '),part='';for(const word of words){const candidate=part?part+' '+word:word;if(ctx.measureText(candidate).width>overlay.width-op.x*overlay.width-12&&part){ctx.fillText(part,op.x*overlay.width,y);y+=lineH;part=word}else part=candidate}ctx.fillText(part,op.x*overlay.width,y);y+=lineH}ctx.restore();return}if(op.kind==='fill')fillRegion(Math.round(op.x*overlay.width),Math.round(op.y*overlay.height),op.color,op.tol,false)}
 function rgba(hex){const v=hex.replace('#','');return [parseInt(v.slice(0,2),16),parseInt(v.slice(2,4),16),parseInt(v.slice(4,6),16)]}
+// Keep the PDF linework visible above the fill by reducing color opacity at ink pixels.
 // Composite a boundary mask from the PDF and student-drawn strokes. Colors remain on a separate overlay.
 function fillRegion(sx,sy,color,tol,showWarning=true){
 const w=base.width,h=base.height;if(sx<0||sy<0||sx>=w||sy>=h)return false;
@@ -78,7 +79,13 @@ const start=sy*w+sx;if(border(start)){if(showWarning)notify('Tap a light area in
 const count=w*h,seen=new Uint8Array(count),mask=new Uint8ClampedArray(count*4),stack=new Int32Array(count);
 let top=0,filled=0,edge=false;stack[top++]=start;seen[start]=1;const rgb=rgba(color);
 while(top){const p=stack[--top];if(border(p))continue;
- const i=p*4;mask[i]=rgb[0];mask[i+1]=rgb[1];mask[i+2]=rgb[2];mask[i+3]=210;filled++;
+ const i=p*4;mask[i]=rgb[0];mask[i+1]=rgb[1];mask[i+2]=rgb[2];
+// Preserve the PDF's printed ink and the student's outline above the color.
+// Avoid coloring dark pixels and fade the fill along anti-aliased edges.
+const ink=(src[i]+src[i+1]+src[i+2])/(3*255);
+const lineAlpha=drawn[i+3]/255;
+const paperWeight=Math.pow(Math.max(0,(ink-0.12)/0.88),1.5);
+mask[i+3]=Math.round(225*paperWeight*(1-lineAlpha));filled++;
  const x=p%w,y=(p/w)|0;if(x===0||y===0||x===w-1||y===h-1)edge=true;
  // Reject unbounded regions. Previous fills stay untouched when a region leaks.
  if(filled>Math.floor(count*.48)||edge){if(showWarning)notify('This outline is open or reaches the page edge. Use Close outline, or join the gap with the pencil.');return false}
